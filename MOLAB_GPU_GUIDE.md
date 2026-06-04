@@ -130,6 +130,7 @@ python scripts/train_all_cloud.py --epochs 50 --batch_size 16 --device cuda --nu
 ```
 
 Mac dinh script dung `--resume auto`, nen neu molab session bi ngat, chay lai cung lenh tren de tiep tuc tu `checkpoints/last_<model>.pth`.
+Auto-resume se bo qua checkpoint neu hyperparameters khong khop voi lenh hien tai, vi du checkpoint smoke test `--epochs 1` se khong duoc dung cho run chinh thuc `--epochs 50`.
 
 Co the train rieng model:
 

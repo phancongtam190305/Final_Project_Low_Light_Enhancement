@@ -46,7 +46,19 @@ def save_checkpoint(path, epoch, model, optimizer, scheduler, psnr, ssim, best_p
     )
 
 
-def maybe_resume(resume_path, model, optimizer, scheduler, device, required=False):
+def resume_args_match(checkpoint_args, args):
+    if not checkpoint_args:
+        return True
+
+    keys = ("model", "epochs", "lr", "weight_decay")
+    for key in keys:
+        if checkpoint_args.get(key) != getattr(args, key):
+            return False
+
+    return True
+
+
+def maybe_resume(resume_path, model, optimizer, scheduler, device, args, required=False):
     if resume_path is None:
         return 0, -1.0
 
@@ -58,6 +70,14 @@ def maybe_resume(resume_path, model, optimizer, scheduler, device, required=Fals
 
     print(f"Loading resume checkpoint: {resume_path}")
     checkpoint = torch.load(resume_path, map_location=device)
+
+    if not required and not resume_args_match(checkpoint.get("args"), args):
+        print(
+            "Auto-resume checkpoint hyperparameters do not match this run; "
+            "starting fresh instead."
+        )
+        return 0, -1.0
+
     model.load_state_dict(checkpoint["model_state_dict"])
 
     if "optimizer_state_dict" in checkpoint:
@@ -158,6 +178,7 @@ def main():
         optimizer,
         scheduler,
         device,
+        args,
         required=bool(args.resume and args.resume.lower() != "auto"),
     )
 
