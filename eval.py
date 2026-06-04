@@ -1,4 +1,5 @@
 import argparse
+import copy
 import csv
 import json
 import os
@@ -33,7 +34,8 @@ def estimate_flops(model, device):
         from thop import profile
 
         dummy_input = torch.randn(1, 3, 400, 600).to(device)
-        flops, _ = profile(model, inputs=(dummy_input,), verbose=False)
+        flops_model = copy.deepcopy(model).to(device).eval()
+        flops, _ = profile(flops_model, inputs=(dummy_input,), verbose=False)
         return f"{flops / 1e9:.3f} GFLOPs"
     except ImportError:
         return "N/A (install thop)"
@@ -59,7 +61,7 @@ def evaluate_model(model_name, data_dir, device, checkpoint_dir, results_dir):
         return None
 
     print(f"Loading checkpoint: {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     print(
         f"Checkpoint epoch {checkpoint['epoch']} "
