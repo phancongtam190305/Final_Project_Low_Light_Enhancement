@@ -37,6 +37,30 @@ def download_file(url, output_dir):
     return output_path
 
 
+def download_gdrive(gdrive_url, gdrive_id, output_dir):
+    try:
+        import gdown
+    except ImportError as exc:
+        raise RuntimeError("Google Drive download needs gdown. Install with: pip install gdown") from exc
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "LOL-v1.zip"
+
+    if gdrive_id:
+        print(f"Downloading Google Drive file id={gdrive_id} to {output_path}")
+        downloaded = gdown.download(id=gdrive_id, output=str(output_path), quiet=False)
+    else:
+        print(f"Downloading Google Drive URL to {output_path}")
+        downloaded = gdown.download(url=gdrive_url, output=str(output_path), quiet=False, fuzzy=True)
+
+    if downloaded is None:
+        raise RuntimeError(
+            "Google Drive download failed. Make sure the file is shared as 'Anyone with the link can view'."
+        )
+
+    return Path(downloaded)
+
+
 def extract_zip(zip_path, output_dir):
     print(f"Extracting {zip_path} to {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -63,6 +87,8 @@ def main():
     source.add_argument("--zip", dest="zip_path", help="Path to a LOL-v1 zip archive.")
     source.add_argument("--source_dir", help="Path to an extracted LOL-v1 folder.")
     source.add_argument("--url", help="Direct URL to a LOL-v1 zip archive.")
+    source.add_argument("--gdrive_url", help="Google Drive share URL to a LOL-v1 zip archive.")
+    source.add_argument("--gdrive_id", help="Google Drive file id for a LOL-v1 zip archive.")
     parser.add_argument("--target_dir", default="./data", help="Output dataset root expected by train.py.")
     parser.add_argument("--work_dir", default="./_dataset_tmp", help="Temporary download/extract folder.")
     args = parser.parse_args()
@@ -71,6 +97,10 @@ def main():
 
     if args.url:
         zip_path = download_file(args.url, work_dir)
+        extract_root = extract_zip(zip_path, work_dir / "extracted")
+        source_root = find_lol_root(extract_root)
+    elif args.gdrive_url or args.gdrive_id:
+        zip_path = download_gdrive(args.gdrive_url, args.gdrive_id, work_dir)
         extract_root = extract_zip(zip_path, work_dir / "extracted")
         source_root = find_lol_root(extract_root)
     elif args.zip_path:
