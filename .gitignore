@@ -190,3 +190,9 @@ runs/
 lightning_logs/
 .tensorboard/
 *.log
+
+# Generated evaluation and cloud artifacts
+results/
+artifacts/
+cloud_logs/
+_dataset_tmp/
