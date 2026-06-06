@@ -1,241 +1,202 @@
-# 📋 Context.md — Final Project: Low-Light Image Enhancement
+# Context.md - Final Project: Low-Light Image Enhancement
 
-> **Người thực hiện (task Dô):** Huấn luyện & đánh giá 4 biến thể mô hình họ Zero-DCE trên tập LOL-v1.
-> **Ngày cập nhật:** 2026-06-04
-
----
-
-## 1. Tổng Quan Dự Án
-
-Dự án so sánh hiệu năng (PSNR, SSIM, FLOPs, Params) của nhiều mô hình Low-Light Image Enhancement trên tập **LOL-v1**.
-
-### Phân công nhóm
-| Thành viên | Task                                          | Trạng thái |
-|------------|-----------------------------------------------|------------|
-| **Dô**    | 4 biến thể Zero-DCE (Baseline, ++, ResBlock, DenseBlock) | 🔧 Đang làm |
-| **Phuc**  | SCI                                            | ⏳ Chưa hiện thực |
-| **Ben**   | CPGA-Net (Base, DS-Both, HVI-T, IAAF-SC)      | ⏳ Chưa hiện thực |
-
-### 4 Mô hình của Dô
-1. **Zero_DCE** — Baseline gốc (7 Conv layers, skip connections kiểu U-Net, 8 alpha maps)
-2. **Zero_DCE_PP** — Lightweight: thay Conv bằng DepthwiseSeparableConv
-3. **ZDCE_ResBlock_Small** — Chèn 2 ResBlock giữa Conv3 và Conv4
-4. **ZDCE_DenseBlock_Small** — Chèn 2 DenseBlock giữa Conv3 và Conv4
+> Nhiem vu hien tai: huan luyen, danh gia va chuan bi bao cao cho 4 bien the Zero-DCE tren LOL-v1.  
+> Cap nhat gan nhat: 2026-06-06.
 
 ---
 
-## 2. Cấu Trúc Thư Mục
+## 1. Muc Tieu Va Pham Vi
 
-```
-Final_Project_Low_Light_Enhancement/
-├── data/                          # Dataset LOL-v1 (đã tải sẵn)
-│   ├── our485/                    # Tập train: 485 cặp ảnh (low/ + high/)
-│   │   ├── low/
-│   │   └── high/
-│   └── eval15/                    # Tập val/test: 15 cặp ảnh (low/ + high/)
-│       ├── low/
-│       └── high/
-├── models/
-│   ├── __init__.py                # Re-export tất cả models
-│   ├── sci.py                     # Placeholder SCI (TODO: Phuc)
-│   ├── cpga_net.py                # Placeholder CPGA variants (TODO: Ben)
-│   └── zero_dce/                  # === GÓI MÔ HÌNH CỦA DÔ ===
-│       ├── __init__.py            # Export 4 classes
-│       ├── blocks.py              # DepthwiseSeparableConv, ResBlock, DenseBlock
-│       ├── zero_dce.py            # Zero_DCE baseline
-│       ├── zero_dce_pp.py         # Zero_DCE_PP (Depthwise Separable)
-│       ├── zdce_resblock_small.py # ZDCE_ResBlock_Small
-│       └── zdce_denseblock_small.py # ZDCE_DenseBlock_Small
-├── utils.py                       # LOLDataset, VGGPerceptualLoss, calculate_metrics_numpy
-├── train.py                       # Script CLI huấn luyện (chạy qua terminal)
-├── eval.py                        # Script CLI đánh giá (chạy qua terminal)
-├── train_notebook.py              # Marimo Notebook (giao diện web tương tác)
-├── requirements.txt               # Dependencies
-├── checkpoints/                   # Lưu best checkpoint mỗi model (.pth)
-├── runs/                          # TensorBoard logs
-└── results/                       # Ảnh enhanced output (sau khi chạy eval.py)
-```
+Du an so sanh hieu nang Low-Light Image Enhancement tren tap LOL-v1 bang cac chi so PSNR, SSIM, FLOPs, Params va inference time.
+
+Phan cua Do gom 4 model:
+
+| Model | Mo ta |
+|---|---|
+| `Zero_DCE` | Baseline goc, Conv2d thuong, 8 alpha maps |
+| `Zero_DCE_PP` | Ban nhe, dung DepthwiseSeparableConv |
+| `ZDCE_ResBlock_Small` | Chen 2 ResBlock giua Conv3 va Conv4 |
+| `ZDCE_DenseBlock_Small` | Chen 2 DenseBlock giua Conv3 va Conv4 |
+
+Phan cua nhom:
+
+| Thanh vien | Task | Trang thai |
+|---|---|---|
+| Do | 4 bien the Zero-DCE | Da train/eval cloud, can tong hop bao cao |
+| Phuc | SCI | Placeholder |
+| Ben | CPGA-Net variants | Placeholder |
 
 ---
 
-## 3. Kiến Trúc Mô Hình (Chi tiết)
+## 2. Kien Truc Va Training Config
 
-### Cơ chế chung: Light Enhancement Curve (LE-Curve)
-Tất cả 4 mô hình đều xuất **24 channels** ở layer cuối, chia thành **8 alpha maps** (mỗi alpha map 3 channels cho RGB). Ảnh đầu vào được tăng sáng lặp lại 8 lần theo công thức:
+Tat ca Zero-DCE variants output 24 channels, tach thanh 8 alpha maps RGB. Moi lan tang sang dung:
 
 ```python
 enhanced = enhanced + alpha * enhanced * (1.0 - enhanced)
 ```
 
-### Bảng so sánh kiến trúc
+Training dang dung supervised loss:
 
-| Model               | Conv Type           | Extra Blocks            | Output Channels |
-|----------------------|---------------------|-------------------------|-----------------|
-| Zero_DCE             | Standard Conv2d     | Không                   | 24 (8×3)        |
-| Zero_DCE_PP          | DepthwiseSeparable  | Không                   | 24 (8×3)        |
-| ZDCE_ResBlock_Small  | Standard Conv2d     | 2× ResBlock (giữa C3-C4)| 24 (8×3)       |
-| ZDCE_DenseBlock_Small| Standard Conv2d     | 2× DenseBlock (giữa C3-C4)| 24 (8×3)     |
-
-### Blocks dùng chung (`blocks.py`)
-
-- **DepthwiseSeparableConv**: Depthwise conv (groups=in_channels) → Pointwise conv (1×1) → ReLU
-- **ResBlock**: Conv3×3 → ReLU → Conv3×3 + skip connection (identity shortcut)
-- **DenseBlock**: Conv3×3 → ReLU → Concat(input, output) → Conv3×3 → ReLU
-
----
-
-## 4. Chiến Lược Huấn Luyện
-
-### Loss Function (Supervised)
-Mặc dù Zero-DCE gốc được huấn luyện **không giám sát** (unsupervised), dự án này sử dụng **huấn luyện có giám sát** (supervised) để so sánh công bằng với các mô hình khác:
-
-```
-Total Loss = L1_Loss(enhanced, ground_truth) + 0.01 × VGG_Perceptual_Loss(enhanced, ground_truth)
+```text
+Total Loss = L1(enhanced, ground_truth) + 0.01 * VGGPerceptualLoss(enhanced, ground_truth)
 ```
 
-- **L1 Loss**: So sánh trực tiếp pixel-to-pixel giữa ảnh tăng sáng và ảnh Ground Truth
-- **VGG Perceptual Loss**: Sử dụng features đến relu3_3 (index 16) của VGG16 pretrained ImageNet, tính MSE giữa feature maps → giữ chi tiết & texture tự nhiên
+Config chuan can giu de so sanh cong bang:
 
-### Hyperparameters mặc định
-| Parameter      | Giá trị     |
-|----------------|-------------|
-| Optimizer      | AdamW       |
-| Learning Rate  | 1e-4        |
-| Weight Decay   | 1e-4        |
-| Scheduler      | CosineAnnealingLR (T_max=epochs) |
-| Epochs         | 50          |
-| Batch Size     | 16          |
-| AMP            | Enabled (FP16 trên CUDA) |
-| Gradient Clip  | max_norm=1.0 |
+| Parameter | Gia tri |
+|---|---|
+| Dataset | LOL-v1: `our485` train, `eval15` val/test |
+| Optimizer | AdamW |
+| LR | `1e-4` |
+| Weight decay | `1e-4` |
+| Scheduler | CosineAnnealingLR, `T_max=epochs` |
+| Epochs | `50` |
+| Batch size | `16` neu can khop config ban dau |
+| AMP | Bat tren CUDA bang `torch.amp` |
+| Grad clip | `max_norm=1.0` |
+| Augmentation | random horizontal flip + vertical flip chi tren train |
 
-### Data Augmentation (chỉ tập train)
-- Random Horizontal Flip (p=0.5)
-- Random Vertical Flip (p=0.5)
+Luu y: tren molab co GPU lon nen co the chay batch size cao hon, nhung neu Ben/nhom yeu cau cung config thi dung `batch_size=16`.
 
 ---
 
-## 5. Dataset: LOL-v1
+## 3. Repo Va GitHub
 
-- **Nguồn**: Tải từ mirror Hugging Face (tránh giới hạn quota Google Drive)
-- **Cấu trúc**: `our485/` (485 cặp train) + `eval15/` (15 cặp val/test)
-- **Định dạng ảnh**: PNG, RGB
-- **Tiền xử lý**: ToTensor (normalize [0, 1])
+Remote:
+
+```text
+https://github.com/phancongtam190305/Final_Project_Low_Light_Enhancement.git
+```
+
+Nhanh dang dung cho cloud workflow:
+
+```text
+codex/cloud-gpu-setup
+```
+
+Draft PR:
+
+```text
+https://github.com/phancongtam190305/Final_Project_Low_Light_Enhancement/pull/1
+```
+
+Khong push dataset/checkpoint/log len Git. Cac thu muc `data/`, `checkpoints/`, `runs/`, `results/`, `artifacts/`, `cloud_logs/` duoc ignore.
 
 ---
 
-## 6. Cách Chạy
+## 4. File Va Script Quan Trong
 
-### Cách 1: CLI (Terminal)
+| File | Vai tro |
+|---|---|
+| `train.py` | CLI train 1 model, co AMP moi, `best_*.pth`, `last_*.pth`, auto-resume an toan |
+| `eval.py` | Eval PSNR/SSIM/FLOPs/Params/inference time, xuat CSV/JSON |
+| `scripts/cloud_check.py` | Check CUDA, GPU, dataset, forward 4 model, warmup VGG16 |
+| `scripts/prepare_lol_v1.py` | Chuan hoa dataset tu zip/source URL/Google Drive |
+| `scripts/train_all_cloud.py` | Train lan luot 4 Zero-DCE variants, mac dinh `--resume auto` |
+| `scripts/eval_and_pack.py` | Eval all model va zip artifacts |
+| `requirements-cloud.txt` | Them `thop` va `gdown` cho cloud |
+| `MOLAB_GPU_GUIDE.md` | Huong dan molab + Google Drive dataset |
+| `train_notebook.py` | Marimo UI training, nhung full train nen uu tien CLI |
+
+Auto-resume trong `train.py` da duoc guard: checkpoint smoke test `epochs=1` se khong bi resume nham cho run chinh thuc `epochs=50`.
+
+---
+
+## 5. Cloud/Molab Trang Thai
+
+Da chay tren marimo/molab GPU:
+
+| Muc | Gia tri |
+|---|---|
+| GPU | NVIDIA RTX PRO 6000 Blackwell Server Edition |
+| VRAM | ~94.97 GB |
+| CUDA | 13.0 |
+| Torch | 2.12.0+cu130 |
+| Python | 3.13.11 |
+| Dataset check | OK: train 485 cap, eval 15 cap |
+| VGG16 warmup | OK |
+
+Dataset duoc dua len Google Drive dang zip, molab tai bang:
+
 ```bash
-# Huấn luyện
-python train.py --model Zero_DCE --epochs 50 --batch_size 16 --lr 1e-4
-
-# Đánh giá 1 model
-python eval.py --model Zero_DCE
-
-# Đánh giá tất cả
-python eval.py --model all
+python scripts/prepare_lol_v1.py --gdrive_url "GOOGLE_DRIVE_SHARE_LINK"
 ```
 
-### Cách 2: Marimo Notebook (Giao diện Web)
+---
+
+## 6. Ket Qua Eval Cloud Hien Co
+
+Da chay `scripts/eval_and_pack.py` va dong goi artifact:
+
+```text
+Final_Project_Low_Light_Enhancement/artifacts/zero_dce_cloud_artifacts_20260604_031456.zip
+```
+
+Bang ket qua tren best checkpoints:
+
+| Model | Best epoch | Params | FLOPs | PSNR | SSIM | Infer ms/img |
+|---|---:|---:|---:|---:|---:|---:|
+| `Zero_DCE` | 7 | 79,416 | 19.008 GFLOPs | 18.6844 | 0.5678 | 1.31 |
+| `Zero_DCE_PP` | 3 | 23,574 | 5.551 GFLOPs | 18.7440 | 0.5688 | 1.38 |
+| `ZDCE_ResBlock_Small` | 5 | 116,408 | 27.855 GFLOPs | 18.5516 | 0.5708 | 1.87 |
+| `ZDCE_DenseBlock_Small` | 8 | 134,840 | 32.279 GFLOPs | 18.5280 | 0.5691 | 2.06 |
+
+Nhan xet nhanh:
+
+- PSNR cao nhat hien tai: `Zero_DCE_PP` (`18.7440 dB`).
+- SSIM cao nhat hien tai: `ZDCE_ResBlock_Small` (`0.5708`).
+- FLOPs/params thap nhat: `Zero_DCE_PP`.
+- Can kiem tra log train neu muon xac nhan full run da dat dung `epochs=50`; best checkpoint co the nam som hon epoch cuoi.
+
+---
+
+## 7. Lenh Molab Can Nho
+
+Cap nhat code:
+
 ```bash
-# Mở ở chế độ edit (code + app)
-marimo edit train_notebook.py
-
-# Mở ở chế độ app (chỉ giao diện, giấu code)
-marimo run train_notebook.py
+cd Final_Project_Low_Light_Enhancement
+git pull
+python -m pip install -r requirements-cloud.txt
 ```
-Trong giao diện Marimo:
-1. Chọn mô hình, thiết lập tham số
-2. Nhấn nút **"🚀 Bắt đầu Huấn luyện"**
-3. Theo dõi progress bar + ảnh so sánh real-time
-4. Khi xong: xem biểu đồ Loss/PSNR + checkpoint được lưu tự động
 
-### TensorBoard
+Check cloud:
+
 ```bash
-tensorboard --logdir ./runs
+python scripts/cloud_check.py
+```
+
+Train dung config chuan:
+
+```bash
+python scripts/train_all_cloud.py --epochs 50 --batch_size 16 --lr 1e-4 --weight_decay 1e-4 --device cuda --num_workers 2
+```
+
+Eval va dong goi:
+
+```bash
+python scripts/eval_and_pack.py --device cuda --include_runs
+```
+
+Neu molab file panel kho tai artifact, tao nut download:
+
+```python
+from pathlib import Path
+import marimo as mo
+
+zip_path = Path("Final_Project_Low_Light_Enhancement/artifacts/zero_dce_cloud_artifacts_20260604_031456.zip")
+mo.download(data=zip_path.read_bytes(), filename=zip_path.name)
 ```
 
 ---
 
-## 7. Metrics Đánh Giá
+## 8. Next Steps
 
-| Metric | Ý nghĩa |
-|--------|---------|
-| **PSNR** (Peak Signal-to-Noise Ratio) | Chất lượng ảnh pixel-level (càng cao càng tốt, đơn vị dB) |
-| **SSIM** (Structural Similarity Index) | Độ tương đồng cấu trúc với Ground Truth (0-1, càng cao càng tốt) |
-| **Params** | Tổng số trainable parameters (phản ánh kích thước model) |
-| **FLOPs** | Floating Point Operations (phản ánh chi phí tính toán, cần `pip install thop`) |
-| **Inference Time** | Thời gian xử lý 1 ảnh (ms) |
-
----
-
-## 8. Dependencies
-
-```
-torch
-torchvision
-marimo
-opencv-python
-matplotlib
-pillow
-scikit-image
-tensorboard
-```
-
-Cài đặt: `pip install -r requirements.txt`
-
----
-
-## 9. Vấn Đề Đã Biết & Lưu Ý
-
-### ⚠️ Quick Test chưa hoàn thành
-- Tiến trình chạy thử 1 epoch (`python train.py --epochs 1 --model Zero_DCE`) bị treo sau bước khởi tạo — có thể do **VGG16 weights chưa được cache** (cần tải ~528MB lần đầu) hoặc do xung đột tài nguyên GPU.
-- **Cần chạy lại quick test** ở session mới để xác nhận pipeline hoạt động trước khi train chính thức.
-
-### ⚠️ Deprecation Warnings (không ảnh hưởng)
-```
-FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated.
-    → Nên đổi thành `torch.amp.GradScaler('cuda', args...)`
-FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated.
-    → Nên đổi thành `torch.amp.autocast('cuda', args...)`
-```
-
-### ⚠️ Windows Unicode
-- Tất cả print trong `train.py` và `eval.py` đã dùng **tiếng Việt không dấu** để tránh `UnicodeEncodeError` trên Windows (mặc định cp1252).
-- `utils.py` và `train_notebook.py` (chạy qua Marimo web) vẫn dùng tiếng Việt có dấu bình thường.
-
-### ⚠️ Marimo Syntax
-- Không dùng `return` thoát sớm trong cell Marimo (gây `SyntaxError: return outside function`).
-- Cell chỉ return biến xuất ở cuối cùng.
-
----
-
-## 10. Việc Cần Làm Tiếp (Next Steps)
-
-1. **Sửa deprecation warnings**: Cập nhật `torch.cuda.amp` → `torch.amp` trong `train.py`, `train_notebook.py`
-2. **Chạy lại quick test 1 epoch** để xác nhận pipeline OK
-3. **Huấn luyện chính thức 4 mô hình** (50 epochs mỗi model):
-   - Zero_DCE
-   - Zero_DCE_PP
-   - ZDCE_ResBlock_Small
-   - ZDCE_DenseBlock_Small
-4. **Chạy eval.py --model all** để tạo bảng so sánh tổng hợp
-5. **Xuất kết quả** (bảng metrics, ảnh enhanced mẫu) cho báo cáo
-
----
-
-## 11. Tóm Tắt File Quan Trọng
-
-| File | Mô tả |
-|------|--------|
-| `models/zero_dce/blocks.py` | Các building blocks dùng chung (DSConv, ResBlock, DenseBlock) |
-| `models/zero_dce/zero_dce.py` | Kiến trúc Zero-DCE baseline |
-| `models/zero_dce/zero_dce_pp.py` | Kiến trúc Zero-DCE++ (lightweight) |
-| `models/zero_dce/zdce_resblock_small.py` | Biến thể với 2 ResBlocks |
-| `models/zero_dce/zdce_denseblock_small.py` | Biến thể với 2 DenseBlocks |
-| `utils.py` | LOLDataset, VGGPerceptualLoss, calculate_metrics_numpy |
-| `train.py` | Script huấn luyện CLI |
-| `eval.py` | Script đánh giá CLI (PSNR/SSIM/FLOPs/Params/InferenceTime) |
-| `train_notebook.py` | Marimo notebook tương tác (web UI) |
-| `requirements.txt` | Danh sách thư viện |
+1. Tai artifact zip ve may local va luu lai de khong mat khi molab session tat.
+2. Mo `results/metrics.csv` va anh trong `results/<model>/` de dua vao bao cao.
+3. Neu can xem chat luong anh theo checkpoint:
+   - Hien co san `best_*.pth` va `last_*.pth`.
+   - Chua co checkpoint tung epoch tru khi sua them `--save_every` va train lai/continue.
+   - Nen them script `scripts/infer_checkpoints.py` de tao grid `Low | Enhanced(best) | Enhanced(last) | GT` cho moi model.
+4. Neu can ket qua cong bang tuyet doi voi config cua Ben/nhom, xac nhan lai batch size/epochs/log full train truoc khi chot bang.
